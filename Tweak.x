@@ -612,20 +612,65 @@ static MSHookMessageEx_t MSHookMessageEx_p = NULL;
 typedef void (*UIWindow_makeKeyAndVisible_t)(id self, SEL _cmd);
 static UIWindow_makeKeyAndVisible_t UIWindow_makeKeyAndVisible_p = NULL;
 
+static NSMutableArray<UIWindow *> *gToastWindows = nil;
+
+// Hiện thông báo nhỏ ở đầu màn hình trong 8 giây để biết tweak chạy tới bước nào
+static void showToast(NSString *text) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!gToastWindows) gToastWindows = [NSMutableArray array];
+
+        CGFloat width = [UIScreen mainScreen].bounds.size.width - 20;
+        CGFloat y = 50 + gToastWindows.count * 70;
+
+        UIWindow *w = [[UIWindow alloc] initWithFrame:CGRectMake(10, y, width, 64)];
+        w.windowLevel = UIWindowLevelAlert + 3;
+        w.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
+        w.layer.cornerRadius = 10;
+        w.clipsToBounds = YES;
+        w.userInteractionEnabled = NO;
+
+        UILabel *l = [[UILabel alloc] initWithFrame:CGRectInset(w.bounds, 8, 4)];
+        l.numberOfLines = 0;
+        l.textColor = [UIColor whiteColor];
+        l.font = [UIFont systemFontOfSize:12];
+        l.text = text;
+        [w addSubview:l];
+
+        w.hidden = NO;
+        [gToastWindows addObject:w];
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            w.hidden = YES;
+            [gToastWindows removeObject:w];
+        });
+    });
+}
+
 static void makeKeyAndVisible(id self, SEL _cmd) {
     UIWindow_makeKeyAndVisible_p(self, _cmd);
 
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        showToast(@"Auto Click - bước 2: đã bắt được cửa sổ game");
+
         // Đợi 1 giây cho giao diện chính của app hiện xong
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [[AutoClickerManager sharedInstance] setupUI];
+            @try {
+                [[AutoClickerManager sharedInstance] setupUI];
+                showToast(@"Auto Click - bước 3: giao diện đã dựng xong");
+            } @catch (NSException *e) {
+                showToast([NSString stringWithFormat:@"Auto Click LỖI: %@ - %@", e.name, e.reason]);
+            }
         });
     });
 }
 
 __attribute__((constructor))
 static void tweakConstructor() {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        showToast(@"Auto Click - bước 1: dylib đã nạp");
+    });
+
     MSHookMessageEx_p = (MSHookMessageEx_t)dlsym(RTLD_DEFAULT, "MSHookMessageEx");
     if (MSHookMessageEx_p) {
         MSHookMessageEx_p(UIWindow.class, @selector(makeKeyAndVisible), (IMP)makeKeyAndVisible, (IMP *)&UIWindow_makeKeyAndVisible_p);
