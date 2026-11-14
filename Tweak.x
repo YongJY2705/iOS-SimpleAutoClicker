@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #include <dlfcn.h>
+#import <objc/runtime.h>
 #import "ZSFakeTouch/ZSFakeTouchDome/ZSFakeTouch/ZSFakeTouch.h"
 
 // --- 预设 10 个点的数据模型 ---
