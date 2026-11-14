@@ -492,9 +492,15 @@ static void makeKeyAndVisible(id self, SEL _cmd) {
 __attribute__((constructor))
 static void tweakConstructor() {
     MSHookMessageEx_p = (MSHookMessageEx_t)dlsym(RTLD_DEFAULT, "MSHookMessageEx");
-    if (!MSHookMessageEx_p) {
+    if (MSHookMessageEx_p) {
+        MSHookMessageEx_p(UIWindow.class, @selector(makeKeyAndVisible), (IMP)makeKeyAndVisible, (IMP *)&UIWindow_makeKeyAndVisible_p);
         return;
     }
 
-	MSHookMessageEx_p(UIWindow.class, @selector(makeKeyAndVisible), (IMP)makeKeyAndVisible, (IMP *)&UIWindow_makeKeyAndVisible_p);
+    // Không có ElleKit/Substrate: hook trực tiếp bằng Objective-C runtime
+    Method m = class_getInstanceMethod(UIWindow.class, @selector(makeKeyAndVisible));
+    if (m) {
+        UIWindow_makeKeyAndVisible_p = (UIWindow_makeKeyAndVisible_t)method_getImplementation(m);
+        method_setImplementation(m, (IMP)makeKeyAndVisible);
+    }
 }
