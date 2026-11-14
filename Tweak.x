@@ -8,7 +8,8 @@
 @property (nonatomic, assign) BOOL isEnabled;
 @property (nonatomic, assign) CGFloat x;
 @property (nonatomic, assign) CGFloat y;
-@property (nonatomic, assign) CGFloat delay;          // thời gian đợi sau khi bấm điểm này (giây)
+@property (nonatomic, assign) CGFloat interval;       // khoảng cách giữa các lần bấm của điểm này (giây)
+@property (nonatomic, assign) CGFloat duration;       // thời gian điểm này hoạt động; hết thì sang điểm tiếp theo (giây)
 @property (nonatomic, strong) UIView *indicatorView;  // chấm đỏ hiển thị trên màn hình
 
 - (NSDictionary *)toDictionary;
@@ -19,7 +20,8 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _delay = 0.3;
+        _interval = 0.3;
+        _duration = 0.3;
     }
     return self;
 }
@@ -29,7 +31,8 @@
         @"isEnabled": @(self.isEnabled),
         @"x": @(self.x),
         @"y": @(self.y),
-        @"delay": @(self.delay)
+        @"interval": @(self.interval),
+        @"duration": @(self.duration)
     };
 }
 
@@ -38,8 +41,13 @@
     self.isEnabled = [dict[@"isEnabled"] boolValue];
     self.x = [dict[@"x"] floatValue];
     self.y = [dict[@"y"] floatValue];
-    if (dict[@"delay"]) {
-        self.delay = [dict[@"delay"] floatValue];
+    if (dict[@"interval"]) {
+        self.interval = [dict[@"interval"] floatValue];
+    }
+    if (dict[@"duration"]) {
+        self.duration = [dict[@"duration"] floatValue];
+    } else if (dict[@"delay"]) { // tương thích bản cũ
+        self.duration = [dict[@"delay"] floatValue];
     }
 }
 @end
@@ -70,7 +78,8 @@
 @property (nonatomic, strong) UILabel *intervalLbl;
 @property (nonatomic, strong) NSMutableArray<UISlider *> *xSliders;
 @property (nonatomic, strong) NSMutableArray<UISlider *> *ySliders;
-@property (nonatomic, strong) NSMutableArray<UILabel *> *delayLabels;
+@property (nonatomic, strong) NSMutableArray<UILabel *> *intervalLabels;
+@property (nonatomic, strong) NSMutableArray<UILabel *> *durationLabels;
 @property (nonatomic, strong) NSMutableArray<TapPointModel *> *points;
 @property (nonatomic, assign) CGFloat clickInterval;    // nghỉ giữa các vòng (giây)
 @property (nonatomic, assign) BOOL isRunning;
@@ -134,7 +143,8 @@
             self.points[i].isEnabled = NO;
             self.points[i].x = screenSize.width / 2;
             self.points[i].y = screenSize.height / 2;
-            self.points[i].delay = 0.3;
+            self.points[i].interval = 0.3;
+            self.points[i].duration = 0.3;
         }
     }
 }
@@ -156,7 +166,8 @@
     if (self.overlayWindow) return;
     self.xSliders = [NSMutableArray arrayWithCapacity:10];
     self.ySliders = [NSMutableArray arrayWithCapacity:10];
-    self.delayLabels = [NSMutableArray arrayWithCapacity:10];
+    self.intervalLabels = [NSMutableArray arrayWithCapacity:10];
+    self.durationLabels = [NSMutableArray arrayWithCapacity:10];
 
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
 
@@ -208,20 +219,15 @@
 
     CGFloat currentY = 20;
 
-    // Nghỉ giữa các vòng
+    // Nghỉ giữa các vòng (chỉnh bằng các nút -10 -1 -0.1 +0.1 +1 +10)
     self.intervalLbl = [[UILabel alloc] initWithFrame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 30)];
     self.intervalLbl.text = [NSString stringWithFormat:@"Nghỉ giữa các vòng: %.2f s", self.clickInterval];
     self.intervalLbl.textColor = [UIColor whiteColor];
     self.intervalLbl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [scrollView addSubview:self.intervalLbl];
 
-    UISlider *intervalSlider = [[UISlider alloc] initWithFrame:CGRectMake(20, currentY + 30, scrollView.frame.size.width - 40, 30)];
-    intervalSlider.minimumValue = 0.05;
-    intervalSlider.maximumValue = 2.0;
-    intervalSlider.value = self.clickInterval;
-    intervalSlider.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [intervalSlider addTarget:self action:@selector(intervalChanged:) forControlEvents:UIControlEventValueChanged];
-    [scrollView addSubview:intervalSlider];
+    [scrollView addSubview:[self makeStepRowWithBaseTag:900
+                                                  frame:CGRectMake(20, currentY + 30, scrollView.frame.size.width - 40, 30)]];
 
     currentY += 80;
 
@@ -281,25 +287,35 @@
 
         currentY += 40;
 
-        // Thời gian đợi sau khi bấm điểm này
-        UILabel *delayLbl = [[UILabel alloc] initWithFrame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 24)];
-        delayLbl.text = [NSString stringWithFormat:@"Đợi sau khi bấm: %.2f s", self.points[i].delay];
-        delayLbl.textColor = [UIColor whiteColor];
-        delayLbl.font = [UIFont systemFontOfSize:14];
-        delayLbl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        [scrollView addSubview:delayLbl];
-        [self.delayLabels addObject:delayLbl];
+        // Khoảng cách giữa các lần bấm của chính điểm này
+        UILabel *intervalPtLbl = [[UILabel alloc] initWithFrame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 24)];
+        intervalPtLbl.text = [NSString stringWithFormat:@"Bấm lặp mỗi: %.2f s", self.points[i].interval];
+        intervalPtLbl.textColor = [UIColor whiteColor];
+        intervalPtLbl.font = [UIFont systemFontOfSize:14];
+        intervalPtLbl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [scrollView addSubview:intervalPtLbl];
+        [self.intervalLabels addObject:intervalPtLbl];
 
         currentY += 26;
 
-        UISlider *delaySlider = [[UISlider alloc] initWithFrame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 30)];
-        delaySlider.minimumValue = 0;
-        delaySlider.maximumValue = 5.0;
-        delaySlider.value = self.points[i].delay;
-        delaySlider.tag = 300 + i;
-        delaySlider.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        [delaySlider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
-        [scrollView addSubview:delaySlider];
+        [scrollView addSubview:[self makeStepRowWithBaseTag:(2000 + i * 10)
+                                                      frame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 30)]];
+
+        currentY += 40;
+
+        // Thời gian điểm này hoạt động (hết thời gian mới sang điểm tiếp theo)
+        UILabel *durationLbl = [[UILabel alloc] initWithFrame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 24)];
+        durationLbl.text = [NSString stringWithFormat:@"Chạy trong: %.2f s", self.points[i].duration];
+        durationLbl.textColor = [UIColor whiteColor];
+        durationLbl.font = [UIFont systemFontOfSize:14];
+        durationLbl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [scrollView addSubview:durationLbl];
+        [self.durationLabels addObject:durationLbl];
+
+        currentY += 26;
+
+        [scrollView addSubview:[self makeStepRowWithBaseTag:(1000 + i * 10)
+                                                      frame:CGRectMake(20, currentY, scrollView.frame.size.width - 40, 30)]];
 
         currentY += 40;
 
@@ -417,9 +433,65 @@
     self.settingsPanel.hidden = !self.settingsPanel.hidden;
 }
 
-- (void)intervalChanged:(UISlider *)slider {
-    self.clickInterval = slider.value;
-    self.intervalLbl.text = [NSString stringWithFormat:@"Nghỉ giữa các vòng: %.2f s", self.clickInterval];
+// Tạo một hàng 6 nút: -10, -1, -0.1, +0.1, +1, +10
+- (UIStackView *)makeStepRowWithBaseTag:(NSInteger)baseTag frame:(CGRect)frame {
+    NSArray<NSString *> *titles = @[@"-10", @"-1", @"-0.1", @"+0.1", @"+1", @"+10"];
+    NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
+    for (NSInteger k = 0; k < 6; k++) {
+        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+        [b setTitle:titles[k] forState:UIControlStateNormal];
+        [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        b.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+        b.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
+        b.layer.cornerRadius = 6;
+        b.tag = baseTag + k;
+        [b addTarget:self action:@selector(stepTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [buttons addObject:b];
+    }
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:buttons];
+    stack.axis = UILayoutConstraintAxisHorizontal;
+    stack.distribution = UIStackViewDistributionFillEqually;
+    stack.spacing = 4;
+    stack.frame = frame;
+    stack.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    return stack;
+}
+
+// Bấm nút cộng/trừ thời gian
+- (void)stepTapped:(UIButton *)sender {
+    static const double steps[6] = {-10.0, -1.0, -0.1, 0.1, 1.0, 10.0};
+    NSInteger tag = sender.tag;
+
+    if (tag >= 2000) { // Khoảng cách giữa các lần bấm của từng điểm
+        NSInteger code = tag - 2000;
+        NSInteger index = code / 10;
+        NSInteger k = code % 10;
+        if (index < 0 || index >= 10 || k >= 6) return;
+
+        double v = self.points[index].interval + steps[k];
+        v = MAX(0.1, MIN(3600.0, round(v * 100.0) / 100.0));
+        self.points[index].interval = v;
+        self.intervalLabels[index].text = [NSString stringWithFormat:@"Bấm lặp mỗi: %.2f s", v];
+    } else if (tag >= 1000) { // Thời gian hoạt động của từng điểm
+        NSInteger code = tag - 1000;
+        NSInteger index = code / 10;
+        NSInteger k = code % 10;
+        if (index < 0 || index >= 10 || k >= 6) return;
+
+        double v = self.points[index].duration + steps[k];
+        v = MAX(0.0, MIN(3600.0, round(v * 100.0) / 100.0));
+        self.points[index].duration = v;
+        self.durationLabels[index].text = [NSString stringWithFormat:@"Chạy trong: %.2f s", v];
+    } else if (tag >= 900) { // Nghỉ giữa các vòng
+        NSInteger k = tag - 900;
+        if (k >= 6) return;
+
+        double v = self.clickInterval + steps[k];
+        v = MAX(0.05, MIN(3600.0, round(v * 100.0) / 100.0));
+        self.clickInterval = v;
+        self.intervalLbl.text = [NSString stringWithFormat:@"Nghỉ giữa các vòng: %.2f s", v];
+    }
+
     [self saveSettings];
 }
 
@@ -434,14 +506,6 @@
 - (void)sliderChanged:(UISlider *)sender {
     NSInteger tag = sender.tag;
     NSInteger index = 0;
-
-    if (tag >= 300) { // Thời gian đợi
-        index = tag - 300;
-        self.points[index].delay = sender.value;
-        self.delayLabels[index].text = [NSString stringWithFormat:@"Đợi sau khi bấm: %.2f s", sender.value];
-        [self saveSettings];
-        return;
-    }
 
     if (tag >= 200) { // Trục Y
         index = tag - 200;
@@ -480,8 +544,8 @@
     self.runToken++; // huỷ mọi bước đang chờ
 }
 
-// Bấm lần lượt từng điểm: nhấn -> nhả -> đợi theo thời gian của điểm đó -> điểm tiếp theo.
-// Hết điểm cuối thì nghỉ "giữa các vòng" rồi quay lại điểm đầu.
+// Chạy lần lượt từng điểm. Mỗi điểm bấm lặp (cách nhau "Bấm lặp mỗi") trong suốt "Chạy trong",
+// hết thời gian đó mới sang điểm tiếp theo. Hết điểm cuối thì nghỉ "giữa các vòng" rồi quay lại điểm đầu.
 - (void)runStepWithToken:(NSUInteger)token index:(NSUInteger)index {
     if (!self.isRunning || token != self.runToken) return;
 
@@ -502,18 +566,40 @@
         return;
     }
 
+    [self clickPointAtIndex:i clickNumber:0 start:[NSProcessInfo processInfo].systemUptime token:token];
+}
+
+// Bấm lần thứ k của một điểm. Mốc thời gian tính từ lúc điểm bắt đầu nên không bị lệch dần.
+- (void)clickPointAtIndex:(NSUInteger)i clickNumber:(NSUInteger)k start:(NSTimeInterval)start token:(NSUInteger)token {
+    if (!self.isRunning || token != self.runToken) return;
+
     TapPointModel *model = self.points[i];
     CGPoint point = CGPointMake(model.x, model.y);
-    double wait = model.delay;
+    double interval = MAX(model.interval, 0.1);
+    double duration = model.duration;
+
+    __weak typeof(self) weakSelf = self;
 
     [ZSFakeTouch beginTouchWithPoint:point];
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         // Luôn nhả touch, kể cả khi vừa bấm dừng, để không bị kẹt
         [ZSFakeTouch endTouchWithPoint:point];
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [weakSelf runStepWithToken:token index:i + 1];
+        NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+        double nextOffset = (double)(k + 1) * interval;
+        BOOL clickAgain = nextOffset < duration;
+
+        // Còn trong thời gian chạy -> chờ tới lần bấm kế; hết thời gian -> chờ tới hết "Chạy trong"
+        double delay = clickAgain ? (start + nextOffset - now) : (start + duration - now);
+        if (delay < 0) delay = 0;
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (clickAgain) {
+                [weakSelf clickPointAtIndex:i clickNumber:k + 1 start:start token:token];
+            } else {
+                [weakSelf runStepWithToken:token index:i + 1];
+            }
         });
     });
 }
